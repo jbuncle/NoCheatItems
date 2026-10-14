@@ -2,6 +2,8 @@ name: Build
 
 on:
   push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -12,8 +14,22 @@ jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.package-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - name: Read package version and validate release tag
+        id: package-version
+        shell: pwsh
+        run: |
+          $version = (Get-Content manifest.json -Raw | ConvertFrom-Json).version_number
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $baseTag = ($env:GITHUB_REF_NAME -split '\+', 2)[0]
+            if ($baseTag -ne "v$version") {
+              throw "Release tag $env:GITHUB_REF_NAME does not match package version $version."
+            }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
@@ -67,3 +83,46 @@ jobs:
             bin/Release/NoCheatItems.dll
             NoCheatItems-*.zip
           if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: NoCheatItems
+          path: artifacts
+      - name: Publish GitHub Release with built files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          dll="artifacts/bin/Release/NoCheatItems.dll"
+          zip="artifacts/NoCheatItems-$PACKAGE_VERSION.zip"
+          notes=".github/releases/$PACKAGE_VERSION.md"
+          test -s "$dll"
+          test -s "$zip"
+          test -s "$notes"
+          # Upload into a draft so the release only becomes public with both assets.
+          if existing_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            if [ "$existing_draft" != 'true' ]; then
+              echo 'This release is already published; refusing to replace its files.' >&2
+              exit 1
+            fi
+            gh release upload "$RELEASE_TAG" "$dll" "$zip" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$dll" "$zip" --verify-tag --draft \
+              --title "NoCheatItems $PACKAGE_VERSION — jbuncle fork, Valheim 1.0.17 compatibility patch" \
+              --notes-file "$notes"
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false --latest
