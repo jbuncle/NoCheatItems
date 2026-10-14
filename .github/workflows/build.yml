@@ -27,15 +27,21 @@ jobs:
           $archivePath = Join-Path $env:RUNNER_TEMP 'steamcmd.zip'
           Invoke-WebRequest 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip' -OutFile $archivePath
           Expand-Archive -LiteralPath $archivePath -DestinationPath $steamCmdPath
-          $steamOutput = & "$steamCmdPath/steamcmd.exe" +force_install_dir "$serverPath" +login anonymous +app_update 896660 validate +quit 2>&1
-          $steamExitCode = $LASTEXITCODE
-          $steamOutput | ForEach-Object { Write-Host $_ }
+          # Finish the fresh SteamCMD install's self-update before requesting app metadata.
+          & "$steamCmdPath/steamcmd.exe" +quit
           # The Windows bootstrapper can return 7 after updating itself even when
           # the child process successfully installs the app. Require proof of success.
-          $installed = ($steamOutput | Out-String) -match "Success! App '896660' fully installed\."
-          if ($steamExitCode -ne 0 -and !($steamExitCode -eq 7 -and $installed)) {
-            throw "SteamCMD failed with exit code $steamExitCode"
+          $installed = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $steamOutput = & "$steamCmdPath/steamcmd.exe" +force_install_dir "$serverPath" +login anonymous +app_update 896660 validate +quit 2>&1
+            $steamExitCode = $LASTEXITCODE
+            $steamOutput | ForEach-Object { Write-Host $_ }
+            $installed = ($steamOutput | Out-String) -match "Success! App '896660' fully installed\."
+            if ($installed -and (Test-Path "$serverPath/valheim_server_Data/Managed/assembly_valheim.dll") -and ($steamExitCode -eq 0 -or $steamExitCode -eq 7)) { break }
+            $installed = $false
+            if ($attempt -lt 3) { Start-Sleep -Seconds 10 }
           }
+          if (!$installed) { throw "SteamCMD installation failed after 3 attempts (exit code $steamExitCode)." }
           if (!(Test-Path "$serverPath/valheim_server_Data/Managed/assembly_valheim.dll")) {
             throw 'SteamCMD did not install the required Valheim assemblies.'
           }
