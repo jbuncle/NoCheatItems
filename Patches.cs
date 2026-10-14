@@ -1,11 +1,34 @@
 using System;
+using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 
 namespace NoCheatItems
 {
-    [HarmonyPatch(typeof(Inventory), "Changed", new[] { typeof(bool), typeof(bool) })]
+    [HarmonyPatch]
     internal static class InventoryChangedPatch
     {
+        private static IEnumerable<MethodBase> TargetMethods()
+        {
+            // Changed's parameters vary between game updates; the postfix only needs the inventory.
+            var targets = new List<MethodBase>();
+            foreach (MethodInfo method in typeof(Inventory).GetMethods(
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            {
+                if (method.Name == "Changed" && method.ReturnType == typeof(void) && !method.ContainsGenericParameters)
+                {
+                    targets.Add(method);
+                }
+            }
+
+            if (targets.Count == 0)
+            {
+                throw new MissingMethodException("NoCheatItems could not find Inventory.Changed in this Valheim version.");
+            }
+
+            return targets;
+        }
+
         private static void Postfix(Inventory __instance)
         {
             CheatCleaner.RunGuardedInventorySweep(__instance);

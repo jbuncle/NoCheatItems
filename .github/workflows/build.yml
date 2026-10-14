@@ -1,0 +1,55 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download current Valheim dedicated server
+        shell: pwsh
+        run: |
+          $steamCmdPath = Join-Path $env:RUNNER_TEMP 'steamcmd'
+          $serverPath = Join-Path $env:RUNNER_TEMP 'valheim'
+          New-Item -ItemType Directory -Force -Path $steamCmdPath | Out-Null
+          $archivePath = Join-Path $env:RUNNER_TEMP 'steamcmd.zip'
+          Invoke-WebRequest 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip' -OutFile $archivePath
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $steamCmdPath
+          & "$steamCmdPath/steamcmd.exe" +force_install_dir "$serverPath" +login anonymous +app_update 896660 validate +quit
+          if ($LASTEXITCODE -ne 0) { throw "SteamCMD failed with exit code $LASTEXITCODE" }
+          if (!(Test-Path "$serverPath/valheim_server_Data/Managed/assembly_valheim.dll")) {
+            throw 'SteamCMD did not install the required Valheim assemblies.'
+          }
+          "VALHEIM_BUILD_PATH=$serverPath" >> $env:GITHUB_ENV
+
+      - name: Build plugin
+        shell: pwsh
+        run: dotnet build NoCheatItems.csproj -c Release "-p:ValheimPath=$env:VALHEIM_BUILD_PATH"
+
+      - name: Package plugin
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package | Out-Null
+          Copy-Item bin/Release/NoCheatItems.dll, README.md, CHANGELOG.md, manifest.json, icon.png -Destination package
+          $version = (Get-Content manifest.json -Raw | ConvertFrom-Json).version_number
+          Compress-Archive -Path package/* -DestinationPath "NoCheatItems-$version.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NoCheatItems
+          path: |
+            bin/Release/NoCheatItems.dll
+            NoCheatItems-*.zip
+          if-no-files-found: error

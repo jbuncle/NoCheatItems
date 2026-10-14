@@ -66,7 +66,7 @@ Pickup and inventory changes are cleaned immediately; the interval is a backup f
 
 ## Build
 
-Requires the Valheim 1.0 client (Unity 6 / `6000.0.75f1`) so the project can reference `assembly_valheim.dll`.
+Requires a .NET 8 SDK or newer and a current Valheim 1.0 client or dedicated-server installation so the project can reference the game's assemblies. Version 1.0.3 resolves `Inventory.Changed` at runtime rather than requiring the 1.0.14 parameter signature, to accommodate 1.0.17 and later compatible updates. This does not guarantee compatibility with future game API changes; verify the plugin on your server after updating.
 
 ```bat
 dotnet build -c Release
@@ -75,3 +75,11 @@ dotnet build -c Release
 If Valheim is not at `D:\Program Files\Steam\steamapps\common\Valheim`, pass `/p:ValheimPath="C:\path\to\Valheim"`.
 
 Output: `bin\Release\NoCheatItems.dll`.
+
+For a dedicated-server install, use the same `ValheimPath` option; the project detects `valheim_server_Data/Managed`. You can also point directly at either installation's assemblies with `-p:ValheimManagedPath="C:\path\to\Managed"`.
+
+### GitHub Actions
+
+GitHub Actions is optional if you can build locally. The included **Build** workflow runs on pushes and pull requests, or manually from **Actions → Build → Run workflow**. It downloads the current public Valheim dedicated server through SteamCMD (anonymous login), builds the plugin, and uploads a **NoCheatItems** artifact containing the DLL and a Thunderstore package ZIP. No Steam credentials are required. Game assemblies are excluded from the package.
+
+Push these changes to GitHub, wait for the workflow to succeed, and download the artifact from its run page. Extract `NoCheatItems.dll` and install it as described above. The workflow builds against the latest public server, rather than pinning 1.0.17; a successful compile still needs an in-game check of plugin startup, inventory cleanup, and world-drop cleanup. Use `DryRun = true` for the initial check.

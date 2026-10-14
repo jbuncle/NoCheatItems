@@ -5,11 +5,20 @@
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <Version>1.0.2</Version>
-    <AssemblyVersion>1.0.2.0</AssemblyVersion>
-    <FileVersion>1.0.2.0</FileVersion>
+    <Version>1.0.3</Version>
+    <AssemblyVersion>1.0.3.0</AssemblyVersion>
+    <FileVersion>1.0.3.0</FileVersion>
     <OutputPath>bin\$(Configuration)\</OutputPath>
   </PropertyGroup>
+
+  <PropertyGroup>
+    <ValheimManagedPath Condition="'$(ValheimManagedPath)' == '' and Exists('$(ValheimPath)/valheim_Data/Managed/assembly_valheim.dll')">$(ValheimPath)/valheim_Data/Managed</ValheimManagedPath>
+    <ValheimManagedPath Condition="'$(ValheimManagedPath)' == ''">$(ValheimPath)/valheim_server_Data/Managed</ValheimManagedPath>
+  </PropertyGroup>
+
+  <Target Name="ValidateValheimReferences" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(ValheimManagedPath)/assembly_valheim.dll')" Text="Valheim assemblies were not found. Set ValheimPath to a client or dedicated-server installation, or ValheimManagedPath to its Managed directory." />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="BepInEx.Core" Version="5.4.21" PrivateAssets="all" ExcludeAssets="runtime" />
@@ -17,19 +26,19 @@
 
   <ItemGroup>
     <Reference Include="assembly_valheim">
-      <HintPath>$(ValheimPath)\valheim_Data\Managed\assembly_valheim.dll</HintPath>
+      <HintPath>$(ValheimManagedPath)/assembly_valheim.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="assembly_utils">
-      <HintPath>$(ValheimPath)\valheim_Data\Managed\assembly_utils.dll</HintPath>
+      <HintPath>$(ValheimManagedPath)/assembly_utils.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine">
-      <HintPath>$(ValheimPath)\valheim_Data\Managed\UnityEngine.dll</HintPath>
+      <HintPath>$(ValheimManagedPath)/UnityEngine.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
-      <HintPath>$(ValheimPath)\valheim_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <HintPath>$(ValheimManagedPath)/UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

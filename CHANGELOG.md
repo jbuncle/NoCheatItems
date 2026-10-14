@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.3
+- Resolve inventory change hooks at runtime instead of requiring the 1.0.14 `(bool, bool)` signature. Intended for Valheim 1.0.17 and later compatible updates; game testing is still required.
+- Support building against either client or dedicated-server assemblies, with a clear error when references are missing.
+- Add a GitHub Actions build and installable package using the current public dedicated server.
+
 ## 1.0.2
 - Delete cheated creature loot on the dedicated server. Vanilla sets `m_cheated` after `ItemDrop.Awake`, so the old check ran too early and never saw the flag. Also reloads ground piles from the ZDO on the periodic sweep.
 - Inventory `Changed` patch matches the 1.0.14 `(bool, bool)` signature.
