@@ -27,12 +27,20 @@ jobs:
           $archivePath = Join-Path $env:RUNNER_TEMP 'steamcmd.zip'
           Invoke-WebRequest 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip' -OutFile $archivePath
           Expand-Archive -LiteralPath $archivePath -DestinationPath $steamCmdPath
-          & "$steamCmdPath/steamcmd.exe" +force_install_dir "$serverPath" +login anonymous +app_update 896660 validate +quit
-          if ($LASTEXITCODE -ne 0) { throw "SteamCMD failed with exit code $LASTEXITCODE" }
+          $steamOutput = & "$steamCmdPath/steamcmd.exe" +force_install_dir "$serverPath" +login anonymous +app_update 896660 validate +quit 2>&1
+          $steamExitCode = $LASTEXITCODE
+          $steamOutput | ForEach-Object { Write-Host $_ }
+          # The Windows bootstrapper can return 7 after updating itself even when
+          # the child process successfully installs the app. Require proof of success.
+          $installed = ($steamOutput | Out-String) -match "Success! App '896660' fully installed\."
+          if ($steamExitCode -ne 0 -and !($steamExitCode -eq 7 -and $installed)) {
+            throw "SteamCMD failed with exit code $steamExitCode"
+          }
           if (!(Test-Path "$serverPath/valheim_server_Data/Managed/assembly_valheim.dll")) {
             throw 'SteamCMD did not install the required Valheim assemblies.'
           }
           "VALHEIM_BUILD_PATH=$serverPath" >> $env:GITHUB_ENV
+          $global:LASTEXITCODE = 0
 
       - name: Build plugin
         shell: pwsh
