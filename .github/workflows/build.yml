@@ -122,7 +122,7 @@ jobs:
             gh release upload "$RELEASE_TAG" "$dll" "$zip" --clobber
           else
             gh release create "$RELEASE_TAG" "$dll" "$zip" --verify-tag --draft \
-              --title "NoCheatItems $PACKAGE_VERSION — jbuncle fork, Valheim 1.0.17 compatibility patch" \
+              --title "NoCheatItems $PACKAGE_VERSION — jbuncle fork" \
               --notes-file "$notes"
           fi
           gh release edit "$RELEASE_TAG" --draft=false --latest

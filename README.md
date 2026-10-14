@@ -60,9 +60,21 @@ Sweeps every loaded player, container, world drop, and item stand immediately.
 | `ScanIntervalSeconds` | 8 | Safety-net sweep while the world is loaded |
 | `NotifyPlayers` | true | Center-screen message when their items are taken |
 | `LogDeletions` | true | BepInEx log line per item |
+| `DebugLogging` | false | Info-level heartbeat, hook counts, per-inventory counts, and sweep totals |
 | `DryRun` | false | Log only, do not delete |
 
 Pickup and inventory changes are cleaned immediately; the interval is a backup for stands and anything a patch missed.
+
+### Troubleshooting a sweep that removes nothing
+
+Stop the server and set `DebugLogging = true` under `[4 - Output]` in `BepInEx/config/ageous27.nocheatitems.cfg`, then restart with plugin 1.0.4 or newer. Look for `[debug]` lines in `BepInEx/LogOutput.log`; they use info level, so BepInEx's global debug filter does not need to change.
+
+- `heartbeat (update)` appears at the scan interval even when cleanup is disabled or this instance is a client. It reports `ZNetPresent`, `IsServer`, `Enabled`, scan options, detection settings, and inventory-hook counts since the previous heartbeat.
+- `inventory hook target` at startup shows the resolved `Inventory.Changed` method signatures.
+- `inventory` reports stacks, raw `m_cheated` flags, and matched stacks, including empty inventories. The raw flag count is independent of `RemoveFlaggedItems`.
+- `sweep (periodic) start` and `complete` show whether cleanup runs, along with players/containers/inventories/items scanned, invalid network views skipped, container ownership, flagged items, and matches. Item counts are stacks or stand attachments rather than total quantities; disabled scan categories report zero.
+
+Repeat the pickup/chest test for at least two scan intervals. Counts describe the data visible to this plugin instance; they help distinguish a blocked server guard, absent or empty inventories, and visible stacks whose cheated flags are missing. Turn `DebugLogging` off after collecting the log.
 
 ## Build
 

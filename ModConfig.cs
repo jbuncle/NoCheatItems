@@ -17,6 +17,7 @@ namespace NoCheatItems
         internal static ConfigEntry<float> ScanIntervalSeconds;
         internal static ConfigEntry<bool> NotifyPlayers;
         internal static ConfigEntry<bool> LogDeletions;
+        internal static ConfigEntry<bool> DebugLogging;
         internal static ConfigEntry<bool> DryRun;
 
         internal static void Bind(ConfigFile config)
@@ -64,6 +65,9 @@ namespace NoCheatItems
 
             LogDeletions = config.Bind(output, nameof(LogDeletions), true,
                 "Write a BepInEx log line for every deleted item.");
+
+            DebugLogging = config.Bind(output, nameof(DebugLogging), false,
+                "Write [debug] diagnostics at info level: update heartbeat and server status, inventory hooks, sweep counts, and per-inventory stack/cheated-flag counts. Can produce many log lines; turn off after troubleshooting.");
 
             DryRun = config.Bind(output, nameof(DryRun), false,
                 "Log what would be deleted without actually removing anything.");

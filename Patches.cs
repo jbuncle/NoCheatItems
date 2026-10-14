@@ -18,6 +18,7 @@ namespace NoCheatItems
                 if (method.Name == "Changed" && method.ReturnType == typeof(void) && !method.ContainsGenericParameters)
                 {
                     targets.Add(method);
+                    if (ModConfig.DebugLogging.Value) CheatCleaner.DebugLog("inventory hook target: " + method);
                 }
             }
 
@@ -31,6 +32,7 @@ namespace NoCheatItems
 
         private static void Postfix(Inventory __instance)
         {
+            CheatCleaner.RecordInventoryChangedHook();
             CheatCleaner.RunGuardedInventorySweep(__instance);
         }
     }

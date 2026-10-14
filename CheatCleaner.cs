@@ -15,6 +15,40 @@ namespace NoCheatItems
 
         private static bool _sweeping;
         private static bool _reloadingDrop;
+        private static int _inventoryChangedHooks;
+        private static int _guardedInventorySweeps;
+
+        internal static void DebugLog(string message)
+        {
+            if (ModConfig.DebugLogging.Value)
+            {
+                // Info is intentional: BepInEx's default log filter hides LogDebug messages.
+                NoCheatItemsPlugin.Log.LogInfo("[debug] " + message);
+            }
+        }
+
+        internal static void RecordInventoryChangedHook()
+        {
+            if (ModConfig.DebugLogging.Value)
+            {
+                _inventoryChangedHooks++;
+            }
+        }
+
+        internal static void LogDebugHeartbeat(string context)
+        {
+            if (!ModConfig.DebugLogging.Value)
+            {
+                return;
+            }
+
+            DebugLog($"heartbeat ({context}): ZNetPresent={ZNet.instance != null}, IsServer={IsServer()}, Enabled={ModConfig.Enabled.Value}, Sweeping={_sweeping}; " +
+                $"inventoryChangedHooks={_inventoryChangedHooks}, guardedInventorySweeps={_guardedInventorySweeps} since previous heartbeat; " +
+                $"ScanPlayers={ModConfig.ScanPlayers.Value}, ScanContainers={ModConfig.ScanContainers.Value}, ScanWorldDrops={ModConfig.ScanWorldDrops.Value}, ScanItemStands={ModConfig.ScanItemStands.Value}; " +
+                $"RemoveFlaggedItems={ModConfig.RemoveFlaggedItems.Value}, DryRun={ModConfig.DryRun.Value}, intervalSeconds={ModConfig.ScanIntervalSeconds.Value}, timeScale={Time.timeScale}, deltaTime={Time.deltaTime}");
+            _inventoryChangedHooks = 0;
+            _guardedInventorySweeps = 0;
+        }
 
         internal static bool IsServer()
         {
@@ -117,28 +151,47 @@ namespace NoCheatItems
             return index > 0 ? name.Substring(0, index).Trim() : name;
         }
 
-        internal static int SweepInventory(Inventory inventory, string context, Player owner = null)
+        internal static int SweepInventory(Inventory inventory, string context, Player owner = null, SweepStats stats = null)
         {
             if (inventory == null || !ModConfig.Enabled.Value)
             {
+                if (stats != null && inventory == null) stats.MissingInventories++;
+                if (ModConfig.DebugLogging.Value)
+                {
+                    DebugLog($"inventory ({context}) skipped: inventoryPresent={inventory != null}, Enabled={ModConfig.Enabled.Value}");
+                }
                 return 0;
             }
 
+            bool debug = ModConfig.DebugLogging.Value;
             List<ItemDrop.ItemData> all = new List<ItemDrop.ItemData>(inventory.GetAllItems());
-            if (all == null || all.Count == 0)
+            if (!debug && all.Count == 0)
             {
                 return 0;
             }
-
             var doomed = new List<ItemDrop.ItemData>();
             var reasons = new List<string>();
+            int flagged = 0;
             foreach (ItemDrop.ItemData item in all)
             {
+                if (debug && item != null && item.m_cheated) flagged++;
                 if (IsCheatItem(item, out string reason))
                 {
                     doomed.Add(item);
                     reasons.Add(reason);
                 }
+            }
+
+            if (stats != null)
+            {
+                stats.InventoriesScanned++;
+                stats.InventoryStacks += all.Count;
+                stats.FlaggedInventoryStacks += flagged;
+                stats.InventoryMatches += doomed.Count;
+            }
+            if (debug)
+            {
+                DebugLog($"inventory ({context}): stacks={all.Count}, rawCheatedFlags={flagged}, matches={doomed.Count}, DryRun={ModConfig.DryRun.Value}");
             }
 
             if (doomed.Count == 0)
@@ -214,7 +267,7 @@ namespace NoCheatItems
             }
         }
 
-        internal static void HandleWorldDrop(ItemDrop drop)
+        internal static void HandleWorldDrop(ItemDrop drop, SweepStats stats = null)
         {
             if (!ModConfig.Enabled.Value || !ModConfig.ScanWorldDrops.Value || !IsServer() || drop == null)
             {
@@ -223,8 +276,11 @@ namespace NoCheatItems
 
             if (!HasValidNetView(drop))
             {
+                if (stats != null) stats.WorldDropsSkipped++;
                 return;
             }
+
+            if (stats != null) stats.WorldDropsScanned++;
 
             // Creature loot sets m_cheated after Instantiate/Awake. Do not Load() first or a
             // stale ZDO can overwrite the in-memory flag. Reload only if we do not already see it.
@@ -233,11 +289,14 @@ namespace NoCheatItems
                 TryReloadDrop(drop);
             }
 
+            if (stats != null && drop.m_itemData != null && drop.m_itemData.m_cheated) stats.FlaggedWorldDrops++;
+
             if (!IsCheatItem(drop.m_itemData, out reason) && !IsBannedPrefab(StripClone(drop.gameObject.name)))
             {
                 return;
             }
 
+            if (stats != null) stats.WorldDropMatches++;
             string label = Describe(drop.m_itemData);
             if (string.IsNullOrEmpty(label))
             {
@@ -260,17 +319,26 @@ namespace NoCheatItems
 
         internal static void SweepLoadedWorld(string context)
         {
-            if (_sweeping || !ModConfig.Enabled.Value || !IsServer())
+            bool isServer = IsServer();
+            if (_sweeping || !ModConfig.Enabled.Value || !isServer)
             {
+                if (ModConfig.DebugLogging.Value)
+                {
+                    DebugLog($"sweep ({context}) skipped: Sweeping={_sweeping}, Enabled={ModConfig.Enabled.Value}, ZNetPresent={ZNet.instance != null}, IsServer={isServer}");
+                }
                 return;
             }
 
+            SweepStats stats = ModConfig.DebugLogging.Value ? new SweepStats() : null;
+            bool failed = false;
+            if (stats != null) DebugLog($"sweep ({context}) start: IsServer={isServer}, DryRun={ModConfig.DryRun.Value}");
             _sweeping = true;
             try
             {
                 if (ModConfig.ScanPlayers.Value)
                 {
                     List<Player> players = Player.GetAllPlayers();
+                    if (stats != null) stats.PlayersFound = players?.Count ?? 0;
                     if (players != null)
                     {
                         foreach (Player player in players)
@@ -280,51 +348,71 @@ namespace NoCheatItems
                                 continue;
                             }
 
-                            SweepInventory(player.GetInventory(), "player " + player.GetPlayerName(), player);
+                            if (stats != null) stats.PlayersScanned++;
+                            int removed = SweepInventory(player.GetInventory(), "player " + player.GetPlayerName(), player, stats);
+                            if (stats != null) stats.InventoryRemovals += removed;
                         }
                     }
                 }
 
                 if (ModConfig.ScanContainers.Value)
                 {
-                    foreach (Container container in FindLoaded<Container>())
+                    Container[] containers = FindLoaded<Container>();
+                    if (stats != null) stats.ContainersFound = containers.Length;
+                    foreach (Container container in containers)
                     {
                         if (container == null || !HasValidNetView(container))
                         {
+                            if (stats != null) stats.ContainersSkipped++;
                             continue;
                         }
 
-                        SweepInventory(container.GetInventory(), DescribeContainer(container));
+                        if (stats != null)
+                        {
+                            stats.ContainersScanned++;
+                            if (container.GetComponent<ZNetView>().IsOwner()) stats.ContainersOwned++;
+                        }
+                        int removed = SweepInventory(container.GetInventory(), DescribeContainer(container), stats: stats);
+                        if (stats != null) stats.InventoryRemovals += removed;
                     }
                 }
 
                 if (ModConfig.ScanWorldDrops.Value)
                 {
-                    SweepWorldDrops();
+                    SweepWorldDrops(stats);
                 }
 
                 if (ModConfig.ScanItemStands.Value)
                 {
-                    SweepStands();
+                    SweepStands(stats);
                 }
             }
             catch (Exception ex)
             {
+                failed = true;
                 NoCheatItemsPlugin.Log.LogError($"Sweep ({context}) failed: {ex}");
             }
             finally
             {
                 _sweeping = false;
+                stats?.LogSummary(context, failed);
             }
         }
 
         internal static bool Sweeping => _sweeping;
 
-        internal static void SweepWorldDrops()
+        internal static void SweepWorldDrops(SweepStats stats = null)
         {
-            foreach (ItemDrop drop in FindLoaded<ItemDrop>())
+            ItemDrop[] drops = FindLoaded<ItemDrop>();
+            if (stats != null) stats.WorldDropsFound = drops.Length;
+            foreach (ItemDrop drop in drops)
             {
-                HandleWorldDrop(drop);
+                if (drop == null)
+                {
+                    if (stats != null) stats.WorldDropsSkipped++;
+                    continue;
+                }
+                HandleWorldDrop(drop, stats);
             }
         }
 
@@ -376,6 +464,7 @@ namespace NoCheatItems
             _sweeping = true;
             try
             {
+                if (ModConfig.DebugLogging.Value) _guardedInventorySweeps++;
                 SweepInventory(inventory, owner != null ? "player " + owner.GetPlayerName() : "container", owner);
             }
             finally
@@ -384,14 +473,21 @@ namespace NoCheatItems
             }
         }
 
-        private static void SweepStands()
+        private static void SweepStands(SweepStats stats = null)
         {
-            foreach (ItemStand stand in FindLoaded<ItemStand>())
+            ItemStand[] itemStands = FindLoaded<ItemStand>();
+            if (stats != null) stats.ItemStandsFound = itemStands.Length;
+            foreach (ItemStand stand in itemStands)
             {
-                if (stand == null || !HasValidNetView(stand) || !stand.HaveAttachment())
+                if (stand == null || !HasValidNetView(stand))
                 {
+                    if (stats != null) stats.StandsSkipped++;
                     continue;
                 }
+
+                if (stats != null) stats.StandsScanned++;
+                if (!stand.HaveAttachment()) continue;
+                if (stats != null) stats.StandAttachments++;
 
                 string attached = PrefabNameFromHash(stand.GetAttachedItem());
                 if (string.IsNullOrEmpty(attached))
@@ -405,18 +501,24 @@ namespace NoCheatItems
                 }
 
                 LogStand("item stand", attached, stand.transform.position);
+                if (stats != null) stats.StandMatches++;
                 if (!ModConfig.DryRun.Value)
                 {
                     stand.DestroyAttachment();
                 }
             }
 
-            foreach (ArmorStand stand in FindLoaded<ArmorStand>())
+            ArmorStand[] armorStands = FindLoaded<ArmorStand>();
+            if (stats != null) stats.ArmorStandsFound = armorStands.Length;
+            foreach (ArmorStand stand in armorStands)
             {
                 if (stand == null || !HasValidNetView(stand))
                 {
+                    if (stats != null) stats.StandsSkipped++;
                     continue;
                 }
+
+                if (stats != null) stats.StandsScanned++;
 
                 for (int i = 0; i < 16; i++)
                 {
@@ -425,6 +527,8 @@ namespace NoCheatItems
                         continue;
                     }
 
+                    if (stats != null) stats.StandAttachments++;
+
                     string attached = PrefabNameFromHash(stand.GetAttachedItem(i));
                     if (string.IsNullOrEmpty(attached) || !IsBannedPrefab(StripClone(attached)))
                     {
@@ -432,6 +536,7 @@ namespace NoCheatItems
                     }
 
                     LogStand("armor stand", attached, stand.transform.position);
+                    if (stats != null) stats.StandMatches++;
                     if (!ModConfig.DryRun.Value)
                     {
                         stand.DestroyAttachment(i);
